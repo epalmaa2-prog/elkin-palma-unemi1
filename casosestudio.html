@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Sistema de Turnos con Prioridades - Clínica</title>
+  <style>
+    /* Estilos simples y legibles */
+    :root { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+    body { margin: 20px; background:#f6f8fa; color:#111; }
+    h1 { font-size:1.4rem; margin-bottom:4px; }
+    .card { background:#fff; border-radius:10px; box-shadow:0 6px 18px rgba(20,20,30,0.06); padding:16px; margin-bottom:12px; }
+    form { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    input[type="text"]{ padding:8px; border-radius:6px; border:1px solid #ccd; min-width:200px; }
+    select { padding:8px; border-radius:6px; border:1px solid #ccd; }
+    button { padding:8px 12px; border-radius:8px; border:0; cursor:pointer; background:#1766d1; color:#fff; }
+    button.secondary { background:#6c757d; }
+    .small { font-size:0.9rem; color:#444; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    ul { list-style:none; padding:0; margin:0; max-height:260px; overflow:auto; }
+    li { padding:8px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; gap:8px; align-items:center; }
+    .badge { padding:4px 8px; border-radius:999px; font-weight:600; font-size:0.85rem; }
+    .alta { background:#ffd1d1; color:#7a0505; }
+    .media { background:#fff2cc; color:#6a4b00; }
+    .baja  { background:#d6f5d6; color:#0a5a10; }
+    .meta { display:flex; gap:12px; align-items:center; }
+    .stats { display:flex; gap:12px; flex-wrap:wrap; }
+    .stat { background:#f3f6fb; padding:8px 10px; border-radius:8px; font-weight:600; }
+    .current { font-size:1.05rem; font-weight:700; color:#1b4f9c; }
+    footer { margin-top:10px; font-size:0.85rem; color:#666; text-align:right; }
+    @media (max-width:720px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>Sistema de Turnos con Prioridades — Clínica</h1>
+
+  <div class="card">
+    <p class="small">Registra pacientes y su prioridad. El sistema atiende primero pacientes con prioridad <strong>Alta</strong>. Si no hay altas, atiende en orden de llegada.</p>
+
+    <!-- Formulario para agregar pacientes -->
+    <form id="formTurno" onsubmit="return false;">
+      <input id="nombre" type="text" placeholder="Nombre del paciente" autocomplete="off" />
+      <label for="prioridad" class="small">Prioridad</label>
+      <select id="prioridad">
+        <option value="Alta">Alta</option>
+        <option value="Media">Media</option>
+        <option value="Baja">Baja</option>
+      </select>
+      <button id="btnAgregar" type="button">Agregar</button>
+      <button id="btnAtender" type="button" class="secondary">Atender siguiente</button>
+      <button id="btnLimpiar" type="button" class="secondary">Limpiar lista</button>
+    </form>
+
+    <div style="margin-top:10px;" class="meta">
+      <div class="stats" id="estadisticas">
+        <!-- Estadísticas se actualizan desde JS -->
+      </div>
+      <div style="margin-left:auto;">
+        <span class="small">Total pendientes:</span>
+        <span id="totalPendientes" class="stat">0</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- Lista de turnos pendientes -->
+    <div class="card">
+      <h3>Turnos pendientes</h3>
+      <ul id="listaTurnos" aria-live="polite"></ul>
+    </div>
+
+    <!-- Paciente siendo atendido y controles -->
+    <div class="card">
+      <h3>Paciente siendo atendido</h3>
+      <p id="actual" class="current">— No hay paciente —</p>
+
+      <h4 style="margin-top:12px">Controles rápidos</h4>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="btnAtenderAlta" type="button">Atender primera Alta</button>
+        <button id="btnSiguiente" type="button">Atender primer en lista</button>
+      </div>
+
+      <h4 style="margin-top:12px">Notas</h4>
+      <p class="small">El sistema emplea un vector <code>turnos[]</code> en JavaScript y recorre el arreglo para encontrar la primera prioridad Alta. Si no hay, atiende al primer elemento (shift).</p>
+    </div>
+  </div>
+
+  <footer>
+    Código comentado — Ejercicio para práctica (HTML + JS puro).
+  </footer>
+
+  <script>
+    /* ====== Datos y estructura ======
+       turnos[]: vector (array) que guardará objetos { id, nombre, prioridad, agregadoEn }
+       Usamos métodos de array, ciclos y condicionales para cumplir los requerimientos.
+    */
+    const turnos = []; // Requerimiento 2: cada registro se guardará aquí
+    let siguienteId = 1; // id incremental para facilitar identificación
+
+    // Referencias al DOM
+    const nombreInput = document.getElementById('nombre');
+    const prioridadSelect = document.getElementById('prioridad');
+    const listaTurnos = document.getElementById('listaTurnos');
+    const actualP = document.getElementById('actual');
+    const totalPendientesSpan = document.getElementById('totalPendientes');
+    const estadisticasDiv = document.getElementById('estadisticas');
+
+    // Botones
+    document.getElementById('btnAgregar').addEventListener('click', agregarTurno);
+    document.getElementById('btnAtender').addEventListener('click', atenderSiguiente);
+    document.getElementById('btnLimpiar').addEventListener('click', limpiarLista);
+    document.getElementById('btnAtenderAlta').addEventListener('click', atenderPrimeraAlta);
+    document.getElementById('btnSiguiente').addEventListener('click', atenderPrimerEnLista);
+
+    // Permitir añadir con Enter en el campo nombre
+    nombreInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') agregarTurno();
+    });
+
+    /* ====== Funciones principales ====== */
+
+    // Agrega un nuevo turno al vector (validaciones incluidas)
+    function agregarTurno() {
+      const nombre = nombreInput.value.trim();
+      const prioridad = prioridadSelect.value;
+
+      // Validaciones: nombre no vacío y longitud razonable
+      if (!nombre) {
+        alert('Ingrese el nombre del paciente.');
+        nombreInput.focus();
+        return;
+      }
+      if (nombre.length > 80) {
+        alert('El nombre es muy largo (máx. 80 caracteres).');
+        nombreInput.focus();
+        return;
+      }
+
+      // Crear objeto turno y guardarlo en el array (push)
+      const turno = {
+        id: siguienteId++,
+        nombre,
+        prioridad, // "Alta" | "Media" | "Baja"
+        agregadoEn: new Date().toISOString()
+      };
+      turnos.push(turno);
+
+      // Limpiar input y actualizar vista
+      nombreInput.value = '';
+      prioridadSelect.value = 'Alta';
+      renderizarLista();
+      actualizarEstadisticas();
+    }
+
+    // Atender siguiente según la lógica esperada:
+    // Si hay pacientes con prioridad Alta, atender el primero de ellos.
+    // Si no hay, atender el primero en la lista (FIFO).
+    function atenderSiguiente() {
+      if (turnos.length === 0) {
+        alert('No hay pacientes en espera.');
+        return;
+      }
+
+      // Buscar índice del primer paciente con prioridad "Alta"
+      let idxAlta = -1;
+      for (let i = 0; i < turnos.length; i++) {
+        if (turnos[i].prioridad === 'Alta') {
+          idxAlta = i;
+          break;
+        }
+      }
+
+      let atendido;
+      if (idxAlta !== -1) {
+        // Atender esa persona (splice para eliminar en su posición)
+        atendido = turnos.splice(idxAlta, 1)[0];
+      } else {
+        // No hay prioridades altas: atender el primero (shift)
+        atendido = turnos.shift();
+      }
+
+      mostrarAtendido(atendido);
+      renderizarLista();
+      actualizarEstadisticas();
+    }
+
+    // Atención explícita: atender primera "Alta"
+    function atenderPrimeraAlta() {
+      if (turnos.length === 0) {
+        alert('No hay pacientes en espera.');
+        return;
+      }
+      const idxAlta = turnos.findIndex(t => t.prioridad === 'Alta');
+      if (idxAlta === -1) {
+        alert('No hay pacientes con prioridad Alta en este momento.');
+        return;
+      }
+      const atendido = turnos.splice(idxAlta, 1)[0];
+      mostrarAtendido(atendido);
+      renderizarLista();
+      actualizarEstadisticas();
+    }
+
+    // Atender simplemente el primer en lista (sin considerar prioridad)
+    function atenderPrimerEnLista() {
+      if (turnos.length === 0) {
+        alert('No hay pacientes en espera.');
+        return;
+      }
+      const atendido = turnos.shift();
+      mostrarAtendido(atendido);
+      renderizarLista();
+      actualizarEstadisticas();
+    }
+
+    // Mostrar en la sección "Paciente siendo atendido"
+    function mostrarAtendido(turno) {
+      // Actualiza visual y podría añadirse historial, etc.
+      actualP.textContent = `${turno.nombre} — Prioridad: ${turno.prioridad}`;
+    }
+
+    // Limpiar lista (vaciar vector)
+    function limpiarLista() {
+      if (!confirm('¿Seguro que desea eliminar todos los turnos pendientes?')) return;
+      turnos.length = 0; // vaciamos el array
+      renderizarLista();
+      actualizarEstadisticas();
+      actualP.textContent = '— No hay paciente —';
+    }
+
+    /* ====== Renderizado y estadísticas ====== */
+
+    // Renderiza la lista de turnos pendiente en el DOM
+    function renderizarLista() {
+      // Limpiar contenido
+      listaTurnos.innerHTML = '';
+
+      // Recorremos el vector turnos[] con un bucle for para generar elementos
+      for (let i = 0; i < turnos.length; i++) {
+        const t = turnos[i];
+        const li = document.createElement('li');
+
+        // Nombre y prioridad
+        const info = document.createElement('div');
+        info.style.display = 'flex';
+        info.style.flexDirection = 'column';
+        info.style.gap = '4px';
+        const nombreSpan = document.createElement('span');
+        nombreSpan.textContent = `${i + 1}. ${t.nombre}`;
+        nombreSpan.style.fontWeight = '600';
+        const fechaSpan = document.createElement('span');
+        fechaSpan.textContent = `Agregado: ${new Date(t.agregadoEn).toLocaleTimeString()}`;
+        fechaSpan.style.fontSize = '0.8rem';
+        fechaSpan.style.color = '#666';
+        info.appendChild(nombreSpan);
+        info.appendChild(fechaSpan);
+
+        // Badge prioridad
+        const badge = document.createElement('span');
+        badge.className = 'badge ' + (t.prioridad === 'Alta' ? 'alta' : (t.prioridad === 'Media' ? 'media' : 'baja'));
+        badge.textContent = t.prioridad;
+
+        // Botón para eliminar este turno individualmente
+        const btnEliminar = document.createElement('button');
+        btnEliminar.textContent = 'Eliminar';
+        btnEliminar.className = 'secondary';
+        btnEliminar.style.background = '#e04d4d';
+        btnEliminar.style.border = 'none';
+        btnEliminar.style.padding = '6px 8px';
+        btnEliminar.style.borderRadius = '6px';
+        btnEliminar.style.color = '#fff';
+        btnEliminar.addEventListener('click', () => {
+          // Encontrar índice por id y eliminar con splice
+          const idx = turnos.findIndex(x => x.id === t.id);
+          if (idx !== -1) {
+            turnos.splice(idx, 1);
+            renderizarLista();
+            actualizarEstadisticas();
+          }
+        });
+
+        // Contenedor derecho con badge y eliminar
+        const right = document.createElement('div');
+        right.style.display = 'flex';
+        right.style.gap = '8px';
+        right.style.alignItems = 'center';
+        right.appendChild(badge);
+        right.appendChild(btnEliminar);
+
+        li.appendChild(info);
+        li.appendChild(right);
+        listaTurnos.appendChild(li);
+      }
+
+      // Actualizamos el contador total
+      totalPendientesSpan.textContent = turnos.length;
+    }
+
+    // Calcula y muestra estadísticas (totales por prioridad, %)
+    function actualizarEstadisticas() {
+      // Contadores
+      let altas = 0, medias = 0, bajas = 0;
+      for (let i = 0; i < turnos.length; i++) {
+        const p = turnos[i].prioridad;
+        if (p === 'Alta') altas++;
+        else if (p === 'Media') medias++;
+        else bajas++;
+      }
+
+      // Porcentajes (evitar división por cero)
+      const total = turnos.length;
+      const pct = (n) => (total === 0 ? '0%' : Math.round((n / total) * 100) + '%');
+
+      // Mostrar en el DIV de estadísticas (reconstruimos)
+      estadisticasDiv.innerHTML = `
+        <div class="stat">Altas: ${altas} (${pct(altas)})</div>
+        <div class="stat">Medias: ${medias} (${pct(medias)})</div>
+        <div class="stat">Bajas: ${bajas} (${pct(bajas)})</div>
+      `;
+    }
+
+    // Render inicial (no turnos)
+    renderizarLista();
+    actualizarEstadisticas();
+
+    /* ====== Comentarios sobre la lógica (para explicar al profesor) ======
+       - Se usa un array (turnos) para almacenar objetos con nombre y prioridad.
+       - Para atender se busca primero la primera 'Alta' recorriendo el array
+         con un loop (for). Si existe, se elimina con splice en su índice.
+       - Si no existe 'Alta', se usa shift() para respetar orden de llegada.
+       - Después de cada operación se actualiza la lista visual y estadísticas.
+       - Hay validaciones simples: nombre no vacío, longitud máxima.
+    */
+  </script>
+</body>
+</html>
